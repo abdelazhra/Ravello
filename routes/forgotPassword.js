@@ -31,7 +31,7 @@ module.exports = (db) => {
           pass: process.env.EMAIL_PASS,
         },
       });
-
+        
       // Tautan reset password
       const resetLink = `http://localhost:${process.env.PORT}/reset-password/${token}`;
 

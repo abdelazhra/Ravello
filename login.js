@@ -1,79 +1,127 @@
-// File: config/login.js
+// File: login.js (atau config/login.js)
 
+// IMPORTS
 const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
-//const bcrypt = require('bcrypt'); 
+const nodemailer = require('nodemailer');
 const path = require('path');
 
-// --- PENTING: MENGATASI LOKASI .ENV ---
-// Pastikan variabel lingkungan dimuat
-require('dotenv').config({ 
-    // Naik satu level dari 'config' ke root proyek
-    path: path.resolve(__dirname, '..', '.env') 
-}); 
+// Load .env
+require('dotenv').config({
+    path: path.resolve(__dirname, '..', '.env')
+});
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// 🚨 Ekspor fungsi yang Menerima 'con'
+// EXPORT FUNCTION (MENERIMA `con`)
 module.exports = (con) => {
-    
-    // Guardrail JWT_SECRET 
+
     if (!JWT_SECRET) {
         throw new Error("FATAL ERROR: JWT_SECRET not defined.");
     }
 
-    // Endpoint: POST /login (Diakses sebagai /auth/login)
-  router.post('/login', async (req, res) => {
-    
-    // 🚨 DEBUGGING SEMENTARA
-    
-    // Jika outputnya {}, maka header Content-Type Anda salah.
-    // ---------------------------------
+    // =====================================================
+    // 🔐 LOGIN
+    // =====================================================
+    router.post('/login', async (req, res) => {
 
-    const { email, password } = req.body;
+        const { email, password } = req.body;
 
         try {
-            // 1. Cari pengguna di database
-            const clientResult = await con.query('SELECT client_id, name, password, email FROM client WHERE email = $1', [email]);
-            const client = clientResult.rows[0];
-            
+            const result = await con.query(
+                "SELECT client_id, name, password, email FROM client WHERE email = $1",
+                [email]
+            );
+
+            const client = result.rows[0];
             if (!client) {
-                return res.status(401).send({ success: false, message: 'Email atau password salah.' });
+                return res.status(401).json({ success: false, message: "Email atau password salah." });
             }
 
-            // 2. Bandingkan Password
-            //const passwordMatch = await bcrypt.compare(password, client.password);
+            // Password kamu saat ini plaintext → dibiarkan dulu
             const passwordMatch = (password === client.password);
 
             if (!passwordMatch) {
-                return res.status(401).send({ success: false, message: 'Email atau password salah.' });
+                return res.status(401).json({ success: false, message: "Email atau password salah." });
             }
-             console.log(`➡️ [AUTH] Pengguna baru berhasil **Login**: ${client.name} (${client.email})`);
-            // 3. Buat Payload dan Tandatangani Token
-            const payload = { 
-                id: client.client_id, 
+
+            const payload = {
+                id: client.client_id,
                 email: client.email,
                 name: client.name
             };
 
-            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' }); 
+            const token = jwt.sign(payload, JWT_SECRET, { expiresIn: "1h" });
 
-            // 4. Kirim Token
-            res.status(200).send({
+            res.status(200).json({
                 success: true,
-                message: 'Login berhasil.',
-                token: token,
+                message: "Login berhasil",
+                token,
                 client_id: client.client_id,
-                name: client.name,          
-                email: client.email
+                name: client.name
             });
 
-        } catch (error) {
-            console.error("Login Error:", error.stack);
-            res.status(500).send({ success: false, message: 'Terjadi kesalahan server internal.' });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ success: false, message: "Terjadi kesalahan server." });
         }
     });
 
-    return router; // Kembalikan objek router
+    // =====================================================
+    // 🔥 FORGOT PASSWORD → KIRIM OTP
+    // =====================================================
+    router.post('/forgot-password', async (req, res) => {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({ error: "Email harus diisi." });
+        }
+
+        try {
+            // Cek apakah email ada
+            const check = await con.query(
+                "SELECT * FROM client WHERE email = $1",
+                [email]
+            );
+
+            if (check.rows.length === 0) {
+                return res.status(404).json({ error: "Email tidak ditemukan." });
+            }
+
+            // Generate OTP 6 digit
+            const otp = Math.floor(100000 + Math.random() * 900000);
+            const expiry = new Date(Date.now() + 5 * 60 * 1000); // 5 menit
+
+            // Simpan OTP + expiry
+            await con.query(
+                "UPDATE client SET otp = $1, otp_expiry = $2 WHERE email = $3",
+                [otp, expiry, email]
+            );
+
+            // Kirim email
+            const transporter = nodemailer.createTransport({
+                service: "gmail",
+                auth: {
+                    user: process.env.EMAIL_USER,
+                    pass: process.env.EMAIL_PASS
+                }
+            });
+
+            await transporter.sendMail({
+                from: `"Ravello App" <${process.env.EMAIL_USER}>`,
+                to: email,
+                subject: "Kode OTP Reset Password",
+                text: `Kode OTP Anda adalah ${otp}. Berlaku 5 menit.`
+            });
+
+            res.json({ message: "OTP berhasil dikirim ke email Anda." });
+
+        } catch (err) {
+            console.error("OTP Error:", err);
+            res.status(500).json({ error: "Terjadi kesalahan server." });
+        }
+    });
+
+    return router;
 };

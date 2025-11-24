@@ -49,9 +49,7 @@ const createProductRouter = require('./routes/product');
 const productRouter = createProductRouter(con); 
 app.use('/product', productRouter);
 
-const createForgotPasswordRouter = require('./routes/forgotPassword');
-const forgotPasswordRouter = createForgotPasswordRouter(con);
-app.use('/forgot-password', forgotPasswordRouter);
+
 
 app.use('/store', storeRouter);
 
